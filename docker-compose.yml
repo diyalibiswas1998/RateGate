@@ -38,3 +38,16 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # Load generator (Phase 7), only started on request:
+  #   docker compose run --no-deps --rm locust -f /mnt/loadtest/locustfile.py ...
+  # --no-deps matters: without it, "run" recreates the API copies from this file,
+  # undoing --scale and any RATEGATE_* settings they were started with.
+  # It runs on the stack's network, so its numbers don't include Windows' port forwarding.
+  locust:
+    image: locustio/locust:2.47.0
+    profiles: ["loadtest"]
+    volumes:
+      - ./loadtest:/mnt/loadtest
+    depends_on:
+      - nginx

@@ -103,9 +103,9 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Phase 7 — Load testing with Locust
 **Intent:** measure, don't guess.
 
-- [ ] `loadtest/locustfile.py` with several simulated clients
-- [ ] Run against the 3-replica compose setup
-- [ ] Record RPS, p50/p95 latency, % 429s per algorithm → table in README
+- [x] `loadtest/locustfile.py` with several simulated clients — 40 polite, 10 greedy, 5 health checks; plus `capacity.py` (clients that never pause)
+- [x] Run against the 3-replica compose setup — Locust runs as a Compose service on the stack's network (`docker compose run --no-deps`); capacity also with 1 and 6 copies
+- [x] Record RPS, p50/p95 latency, % 429s per algorithm → table in README
 
 **Done when:** README contains real numbers from your machine.
 **You learn:** load testing, latency percentiles, reading results honestly.
@@ -122,6 +122,7 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Progress log
 | Date | Phase | What I learned / problems hit |
 |------|-------|-------------------------------|
+| 2026-11-03 | 7 | Locust: 230 req/s mixed traffic, p50 4 ms / p95 6–7 ms; polite clients never limited; greedy clients get 0.88–1.02/s of the configured 1/s. Capacity: 1 copy ~740 served/s (with 502s), 3 copies 1,920/s, 6 copies 2,730/s; the Python copies are the bottleneck, Redis under 30%. Traps: users started in lockstep looked 8× slower; `docker compose run` without `--no-deps` silently recreated the copies with default settings; one Locust process maxed out first |
 | 2026-11-03 | 6 | GitHub Actions: lint, format, 40 tests against a Redis service container (production timeouts, no `.env`), and the Phase 5 stack checked on every push (burst → exactly 100 across 3 copies). 4 of 4 trial runs green in about 30–90 s; a deliberately broken test turned it red on a temporary branch. Learned: not every action has a short major tag (`setup-uv@v10` doesn't exist); a check script must exit non-zero to fail CI |
 | 2026-11-02 | 5 | 3 API copies behind nginx share one Redis: 200 requests at once, limit 100 → exactly 100 for every algorithm (~33 per copy); with separate state per copy, 300 of 400. A stopped copy: 300/300 still answered, ≤1.01 s. 40 tests. Found and fixed a Phase 4 bug: retrying after a timeout counted a request twice (20 late replies → 40 counts); now only connection errors are retried, which also halves outage detection (hung 0.25 s, stopped 1 s). Learned: nginx workers need `zone` to share round-robin; never trust a client's `X-Forwarded-For`; Windows → Docker Desktop is slower than the real network, so this machine gets its own timeouts in `.env` |
 | 2026-11-02 | 4 | Fail-open (200, warning) / fail-closed (503 + Retry-After: 5); hung Redis detected in ~0.5 s instead of a 5 s freeze; recovers with no restart; 36 tests. Learned: measure before choosing timeouts (connect ≠ command), one immediate retry handles stale connections, and check new tests fail on old code (one passed for the wrong reason) |

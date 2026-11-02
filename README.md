@@ -85,6 +85,39 @@ End to end against a running server:
 uv run python scripts/concurrent_burst.py --total 200
 ```
 
+## Load testing
+
+Measured with [Locust](https://locust.io) (`loadtest/`), running inside the stack's Docker network against 3 copies behind nginx. One laptop ran everything: Intel Core i5-14450HX (10 cores, 16 threads), 16 GB RAM, Docker Desktop on Windows. Default limits: a 10-request burst, then 1 request per second per client (sliding windows: 10 per 10 s). Measured 2026-11-03; a repeat run gave numbers within about 6%.
+
+**Mixed traffic, 60 s at full load.** 40 polite clients (1 request every 2 s, under their limit), 10 greedy clients (20 requests/s each, 20 times their limit), and 5 health checks that skip the limiter:
+
+| Algorithm | Requests/s | p50 | p95 | Limited (429) | Polite clients limited | Allowed per greedy client |
+|---|---|---|---|---|---|---|
+| Token bucket | 230 | 4 ms | 7 ms | 86.4% | 0 of 1180 | 1.02/s |
+| Sliding window log | 230 | 4 ms | 6 ms | 86.4% | 0 of 1180 | 1.00/s |
+| Sliding window counter | 230 | 4 ms | 6 ms | 87.0% | 0 of 1180 | 0.88/s |
+
+Clients within their limit are never refused, and clients far over it get the configured 1 request per second: exactly with the log, slightly less with the counter's estimate, slightly more with the bucket (its initial burst). At this load the limiter adds no measurable latency: the health check, which skips Redis, also has a p50 of 4 ms.
+
+**Capacity, 40 s, 150 clients that never pause** (token bucket):
+
+| API copies | Served requests/s | Errors | p95 |
+|---|---|---|---|
+| 1 | 740 | 4,900 `502`s | 240 ms |
+| 3 | 1,920 | 0 | 240 ms |
+| 6 | 2,730 | 0 | 170 ms |
+
+Each copy is one Python process and ran at about one CPU core, while Redis stayed under 30%, so adding copies adds throughput. With one copy, nginx briefly marked the overloaded copy as down and answered `502`. With 6 copies the load generator was itself near its limit, so 2,730 is a lower bound. Latency in these runs mostly measures queueing in a full system; absolute numbers depend on the machine.
+
+Run it yourself (with the stack up):
+
+```bash
+docker compose run --no-deps --rm locust -f /mnt/loadtest/locustfile.py --headless -u 55 -r 5 -t 70s --reset-stats --host http://nginx:80 --csv /mnt/loadtest/results/token_bucket
+uv run python loadtest/summarize.py "Token bucket=loadtest/results/token_bucket"
+```
+
+`--no-deps` matters: without it, `docker compose run` recreates the API copies and drops their settings. The step-by-step guide is `docs/PHASE_7_GUIDE.md`.
+
 ## Configuration
 
 | Variable | Default | Used by |
