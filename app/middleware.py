@@ -1,10 +1,15 @@
+import logging
 import math
 
+from redis.exceptions import RedisError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 EXEMPT_PATHS = {"/health", "/docs", "/openapi.json"}
+OUTAGE_RETRY_AFTER = "5"  # seconds a client should wait while Redis is unreachable
+
+logger = logging.getLogger("rategate")
 
 
 def identify_client(request: Request) -> str:
@@ -21,7 +26,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         limiter = request.app.state.limiter
-        decision = await limiter.check(identify_client(request))
+        try:
+            decision = await limiter.check(identify_client(request))
+        except RedisError as error:
+            if request.app.state.fail_mode == "closed":
+                logger.error(
+                    "Redis unavailable, rejecting request (fail-closed): %s", error
+                )
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "Rate limiter unavailable. Try again shortly."},
+                    headers={"Retry-After": OUTAGE_RETRY_AFTER},
+                )
+            logger.warning("Redis unavailable, allowing request (fail-open): %s", error)
+            return await call_next(request)
 
         headers = {
             "X-RateLimit-Limit": str(decision.limit),

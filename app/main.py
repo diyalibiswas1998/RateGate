@@ -12,6 +12,7 @@ from app.redis_client import create_redis
 async def lifespan(app: FastAPI):
     redis = create_redis(settings)
     app.state.limiter = create_limiter(redis, settings)
+    app.state.fail_mode = settings.fail_mode
     yield
     await redis.aclose()
 

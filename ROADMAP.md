@@ -66,9 +66,9 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Phase 4 — Failure handling (fail-open / fail-closed)
 **Intent:** decide what happens when Redis is down, instead of letting the app crash.
 
-- [ ] Short Redis socket/connect timeouts (e.g. 50–100 ms)
-- [ ] `RATEGATE_FAIL_MODE=open` → allow + log warning; `closed` → `503`
-- [ ] Test: stop Redis mid-test and assert each mode's behaviour
+- [x] Short Redis socket/connect timeouts (e.g. 50–100 ms) — measured instead: 0.25 s per command, 1 s to connect (connects take up to ~600 ms under a burst; 100 ms broke the concurrency tests)
+- [x] `RATEGATE_FAIL_MODE=open` → allow + log warning; `closed` → `503`
+- [x] Test: stop Redis mid-test and assert each mode's behaviour — automated tests simulate the outage with a closed port (including mid-sequence and recovery); real `docker stop` / `docker pause` checked by hand
 
 **Done when:** `docker stop redis` → API still responds according to the configured mode.
 **You learn:** resilience design, availability vs protection trade-off.
@@ -122,6 +122,7 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Progress log
 | Date | Phase | What I learned / problems hit |
 |------|-------|-------------------------------|
+| 2026-11-02 | 4 | Fail-open (200, warning) / fail-closed (503 + Retry-After: 5); hung Redis detected in ~0.5 s instead of a 5 s freeze; recovers with no restart; 36 tests. Learned: measure before choosing timeouts (connect ≠ command), one immediate retry handles stale connections, and check new tests fail on old code (one passed for the wrong reason) |
 | 2026-11-02 | 3 | 31 tests: 200 concurrent requests → exactly 100 for every algorithm; a non-atomic control lets 200/200 through. Tests found 2 bugs: the default Redis pool raised `MaxConnectionsError` under a burst (HTTP 500s), fixed with `BlockingConnectionPool`; the sliding counter's `Retry-After` was too short, fixed in Lua. Learned: write the failing test first, and repeat concurrency tests |
 | 2026-11-02 | 2 | Three algorithms behind `RateLimitStrategy`, chosen by `RATEGATE_ALGORITHM`; middleware untouched; 16 tests pass. Learned: the sliding log returns a burst's allowance all at once a window later, and the sliding counter's results depend on where the window boundary falls. Also: ruff formats code inside Markdown, so `docs/` is excluded |
 | 2026-11-02 | 1 | Token bucket works: burst of 10, refill 1/s, separate buckets per client. Learned: Redis keys expire 10 s after the last request, so inspect Redis on the same line as the requests. Committed `d7687fa` |

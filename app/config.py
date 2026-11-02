@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Algorithm = Literal["token_bucket", "sliding_log", "sliding_counter"]
+FailMode = Literal["open", "closed"]
 
 
 class Settings(BaseSettings):
@@ -11,6 +12,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     redis_max_connections: int = 50  # connections shared by all requests
     redis_pool_timeout: float = 5.0  # seconds to wait for a free connection
+    redis_connect_timeout: float = 1.0  # seconds to open a connection
+    redis_socket_timeout: float = 0.25  # seconds to wait for a command's reply
+    fail_mode: FailMode = "open"  # what to do when Redis can't be reached
     algorithm: Algorithm = "token_bucket"
 
     # Token bucket
