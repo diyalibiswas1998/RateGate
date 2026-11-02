@@ -22,6 +22,29 @@ Run the tests (Redis must be running):
 uv run pytest
 ```
 
+On Windows with Docker Desktop, Redis replies can be delayed under bursts, beyond the production timeouts. Give this machine its own values in a `.env` file (never committed; the containers don't read it):
+
+```
+RATEGATE_REDIS_SOCKET_TIMEOUT=1.0
+RATEGATE_REDIS_CONNECT_TIMEOUT=1.5
+```
+
+## Run the full stack (3 copies behind nginx)
+
+```bash
+docker compose up --build -d --wait
+```
+
+This starts Redis, three copies of the API and nginx, which spreads requests across the copies in turn. Call `http://127.0.0.1:8080/api/resource`: the `X-Instance-Id` header names the copy that answered, while every copy checks the same Redis, so a client is limited once, globally.
+
+```bash
+uv run python scripts/sequential_requests.py                 # one at a time: copies take turns
+uv run python scripts/concurrent_burst.py --url http://127.0.0.1:8080/api/resource
+docker compose down                                         # stop and remove everything
+```
+
+Settings from your terminal (for example `RATEGATE_ALGORITHM` or `RATEGATE_CAPACITY`) are passed into the copies. Behind nginx, clients without an API key are identified by their real IP, taken from the `X-Forwarded-For` header that nginx sets.
+
 ## Algorithms
 
 Choose with `RATEGATE_ALGORITHM` (`token_bucket` | `sliding_log` | `sliding_counter`). All three sit behind one `RateLimitStrategy` interface, so the middleware doesn't know which one is running.
@@ -40,15 +63,17 @@ If Redis can't be reached, `RATEGATE_FAIL_MODE` decides:
 - `open` (default): requests are allowed without limiting, and a warning is logged.
 - `closed`: requests get `503 Service Unavailable` with `Retry-After: 5`, and an error is logged.
 
-Short timeouts (1 s to connect, 0.25 s per command) and a single immediate retry keep outages from freezing requests: a hung Redis is detected in about 0.5 s. Limiting resumes by itself as soon as Redis returns, with no restart.
+Short timeouts (1 s to connect, 0.25 s per command) keep outages from freezing requests: a hung Redis is detected in about 0.25 s and a stopped one in about 1 s. A command whose connection turns out to be dead (for example after a Redis restart) is retried once, immediately; a timed-out command is not, because the script may already have run and would count the request twice. Limiting resumes by itself as soon as Redis returns, with no restart.
 
 ## Testing
 
-`uv run pytest` runs 36 tests against a real Redis, including:
+`uv run pytest` runs 40 tests against a real Redis, including:
 
 - **Concurrency:** 200 simultaneous requests against a limit of 100 allow exactly 100, for every algorithm, from one client and from four independent clients. A deliberately non-atomic limiter in the same test lets all 200 through, showing the test can detect a race.
 - **Boundaries:** waiting the returned `Retry-After` is always enough; idle keys expire on schedule; no double burst across a window boundary.
 - **Failure handling:** with Redis unreachable, fail-open returns `200` and fail-closed returns `503`, within the configured timeouts; limiting resumes where it left off once Redis is back.
+- **No double counting:** a request whose reply times out is counted once, never retried into a second count.
+- **Instance id:** every response, including `429`, carries `X-Instance-Id`.
 
 End to end against a running server:
 
@@ -66,6 +91,7 @@ uv run python scripts/concurrent_burst.py --total 200
 | `RATEGATE_REDIS_CONNECT_TIMEOUT` | `1.0` | All: seconds to open a Redis connection |
 | `RATEGATE_REDIS_SOCKET_TIMEOUT` | `0.25` | All: seconds to wait for a Redis reply |
 | `RATEGATE_FAIL_MODE` | `open` | All: `open` or `closed` when Redis is unreachable |
+| `RATEGATE_INSTANCE_ID` | the hostname | All: the `X-Instance-Id` value; in a container, its ID |
 | `RATEGATE_ALGORITHM` | `token_bucket` | All |
 | `RATEGATE_CAPACITY` | `10` | Token bucket: burst size |
 | `RATEGATE_REFILL_RATE` | `1.0` | Token bucket: tokens per second |

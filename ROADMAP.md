@@ -78,10 +78,10 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Phase 5 — Horizontal scaling
 **Intent:** demonstrate the headline claim — limits hold across multiple instances.
 
-- [ ] `Dockerfile` for the API
-- [ ] `docker-compose.yml`: Redis + 3 API replicas + nginx (round-robin)
-- [ ] Each response includes an `X-Instance-Id` header
-- [ ] Test/script: requests spread across all 3 instances still stop at exactly the limit
+- [x] `Dockerfile` for the API
+- [x] `docker-compose.yml`: Redis + 3 API replicas + nginx (round-robin) — needed `zone` so nginx's 16 workers share one round-robin count, and `proxy_connect_timeout 1s` (a stopped copy cost 38.8 s)
+- [x] Each response includes an `X-Instance-Id` header
+- [x] Test/script: requests spread across all 3 instances still stop at exactly the limit — `scripts/sequential_requests.py`, `scripts/concurrent_burst.py`; client IP via `X-Forwarded-For` (nginx overwrites it, uvicorn `--proxy-headers`)
 
 **Done when:** `docker compose up` → responses come from different instances, but the client is limited once, globally.
 **You learn:** shared state, load balancing, container orchestration basics.
@@ -122,6 +122,7 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Progress log
 | Date | Phase | What I learned / problems hit |
 |------|-------|-------------------------------|
+| 2026-11-02 | 5 | 3 API copies behind nginx share one Redis: 200 requests at once, limit 100 → exactly 100 for every algorithm (~33 per copy); with separate state per copy, 300 of 400. A stopped copy: 300/300 still answered, ≤1.01 s. 40 tests. Found and fixed a Phase 4 bug: retrying after a timeout counted a request twice (20 late replies → 40 counts); now only connection errors are retried, which also halves outage detection (hung 0.25 s, stopped 1 s). Learned: nginx workers need `zone` to share round-robin; never trust a client's `X-Forwarded-For`; Windows → Docker Desktop is slower than the real network, so this machine gets its own timeouts in `.env` |
 | 2026-11-02 | 4 | Fail-open (200, warning) / fail-closed (503 + Retry-After: 5); hung Redis detected in ~0.5 s instead of a 5 s freeze; recovers with no restart; 36 tests. Learned: measure before choosing timeouts (connect ≠ command), one immediate retry handles stale connections, and check new tests fail on old code (one passed for the wrong reason) |
 | 2026-11-02 | 3 | 31 tests: 200 concurrent requests → exactly 100 for every algorithm; a non-atomic control lets 200/200 through. Tests found 2 bugs: the default Redis pool raised `MaxConnectionsError` under a burst (HTTP 500s), fixed with `BlockingConnectionPool`; the sliding counter's `Retry-After` was too short, fixed in Lua. Learned: write the failing test first, and repeat concurrency tests |
 | 2026-11-02 | 2 | Three algorithms behind `RateLimitStrategy`, chosen by `RATEGATE_ALGORITHM`; middleware untouched; 16 tests pass. Learned: the sliding log returns a burst's allowance all at once a window later, and the sliding counter's results depend on where the window boundary falls. Also: ruff formats code inside Markdown, so `docs/` is excluded |

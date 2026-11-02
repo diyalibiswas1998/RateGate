@@ -1,5 +1,7 @@
+import socket
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Algorithm = Literal["token_bucket", "sliding_log", "sliding_counter"]
@@ -15,6 +17,7 @@ class Settings(BaseSettings):
     redis_connect_timeout: float = 1.0  # seconds to open a connection
     redis_socket_timeout: float = 0.25  # seconds to wait for a command's reply
     fail_mode: FailMode = "open"  # what to do when Redis can't be reached
+    instance_id: str = Field(default_factory=socket.gethostname)  # names this copy
     algorithm: Algorithm = "token_bucket"
 
     # Token bucket

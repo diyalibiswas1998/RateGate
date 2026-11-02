@@ -40,6 +40,14 @@ class NaiveCounter:
         return True
 
 
+async def warm_up(client: Redis) -> None:
+    # Open the pool's connections before the burst, as a running server's pool already
+    # is. The test is about atomicity, not about opening 200 connections in one instant.
+    await asyncio.gather(
+        *(client.ping() for _ in range(settings.redis_max_connections))
+    )
+
+
 @pytest.mark.parametrize("name", BUILDERS)
 async def test_simultaneous_requests_never_exceed_limit(redis, client_id, name):
     limiter = BUILDERS[name](redis)
@@ -55,6 +63,8 @@ async def test_limit_holds_across_separate_instances(client_id, name):
     clients = [create_redis(settings) for _ in range(4)]
     limiters = [BUILDERS[name](client) for client in clients]
     try:
+        for client in clients:
+            await warm_up(client)
         decisions = await asyncio.gather(
             *(limiters[i % 4].check(client_id) for i in range(ATTEMPTS))
         )

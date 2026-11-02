@@ -1,10 +1,15 @@
+import asyncio
 import time
 
 import httpx
 import pytest
 from pydantic import ValidationError
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.config import Settings, settings
+from app.limiter.sliding_log import SlidingWindowLog
 from app.limiter.token_bucket import TokenBucket
 from app.main import app
 from app.redis_client import create_redis
@@ -45,8 +50,8 @@ async def test_fail_closed_rejects_requests_when_redis_is_down(redis_down, clien
 
 
 async def test_outage_is_detected_within_the_timeouts(redis_down, client_id):
-    # Worst case: the attempt and its one retry each wait the full connect timeout.
-    budget = 2 * settings.redis_connect_timeout + 0.5
+    # A connect timeout is not retried, so the worst case is one connect timeout.
+    budget = settings.redis_connect_timeout + 0.5
     start = time.perf_counter()
     await call_api(TokenBucket(redis_down, 10, 1.0), "open", client_id)
     assert time.perf_counter() - start < budget
@@ -66,3 +71,25 @@ def test_fail_mode_accepts_only_open_or_closed():
     assert Settings(fail_mode="closed").fail_mode == "closed"
     with pytest.raises(ValidationError):
         Settings(fail_mode="maybe")
+
+
+async def test_a_late_reply_is_counted_once(redis, client_id, monkeypatch):
+    limiter = SlidingWindowLog(redis, limit=10, window_seconds=60)
+    await limiter.check(f"{client_id}-warm")  # makes sure Redis has the script loaded
+    original = Redis.parse_response
+
+    async def late_reply(self, connection, command_name, **options):
+        # The script has been sent and Redis runs it; only its answer is "late".
+        # Do what redis-py does on a real read timeout: drop the connection, then raise.
+        if command_name == "EVALSHA":
+            await asyncio.sleep(0.05)
+            await connection.disconnect(nowait=True)
+            raise RedisTimeoutError("Timeout reading from Redis (simulated)")
+        return await original(self, connection, command_name, **options)
+
+    monkeypatch.setattr(Redis, "parse_response", late_reply)
+    with pytest.raises(RedisError):
+        await limiter.check(client_id)
+    monkeypatch.undo()
+    # One request, one entry. A retry after the timeout would have run it twice.
+    assert await redis.zcard(f"rategate:swl:{client_id}") == 1

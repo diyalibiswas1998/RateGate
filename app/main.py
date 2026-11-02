@@ -21,6 +21,14 @@ app = FastAPI(title="RateGate", lifespan=lifespan)
 app.add_middleware(RateLimitMiddleware)
 
 
+@app.middleware("http")
+async def add_instance_id(request, call_next):
+    # Added last, so it wraps everything: 200s, 429s and 503s all say who answered.
+    response = await call_next(request)
+    response.headers["X-Instance-Id"] = settings.instance_id
+    return response
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
