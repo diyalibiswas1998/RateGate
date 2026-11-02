@@ -12,7 +12,7 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 
 - [x] Install `uv` (`powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`)
 - [x] `git init` + `.gitignore` (done by `uv init`)
-- [ ] Create a public GitHub repo and push (you do this, see below)
+- [x] Create a public GitHub repo and push
 - [x] `uv init`, pin Python 3.12 (`uv python pin 3.12`)
 - [x] Add deps: `fastapi uvicorn[standard] redis pydantic-settings`; dev: `pytest httpx ruff`
 - [x] Run Redis in Docker: `docker run -d -p 6379:6379 --name redis redis:7`
@@ -25,11 +25,11 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Phase 1 — One API, one algorithm (token bucket)
 **Intent:** prove the core idea end to end before adding abstractions.
 
-- [ ] FastAPI app with a `/api/resource` demo route and `/health`
-- [ ] Token bucket as a **Lua script** (read tokens, refill by elapsed time, take one, write back — all atomic)
-- [ ] Use `redis.call('TIME')` inside Lua, never the app server's clock
-- [ ] Middleware: identify the client (API key header, fallback to IP), call the limiter
-- [ ] Blocked → `429` + `Retry-After`; always send `X-RateLimit-Limit / Remaining / Reset`
+- [x] FastAPI app with a `/api/resource` demo route and `/health`
+- [x] Token bucket as a **Lua script** (read tokens, refill by elapsed time, take one, write back — all atomic)
+- [x] Use `redis.call('TIME')` inside Lua, never the app server's clock
+- [x] Middleware: identify the client (API key header, fallback to IP), call the limiter
+- [x] Blocked → `429` + `Retry-After`; always send `X-RateLimit-Limit / Remaining / Reset`
 
 **Done when:** hitting the endpoint in a loop gives 200s then 429s, and tokens refill after waiting.
 **You learn:** token bucket math, Lua atomicity, FastAPI middleware, HTTP semantics.
@@ -39,12 +39,12 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Phase 2 — Strategy interface + two more algorithms
 **Intent:** make algorithms swappable so you can compare their trade-offs.
 
-- [ ] `RateLimitStrategy` abstract class returning a `Decision(allowed, remaining, reset_after, retry_after)`
-- [ ] Refactor token bucket into it
-- [ ] Sliding window log (Redis sorted set: `ZREMRANGEBYSCORE` + `ZCARD` + `ZADD`)
-- [ ] Sliding window counter (current + previous window, weighted)
-- [ ] Choose algorithm + limits via config / env vars
-- [ ] Write in the README: memory cost vs accuracy vs burst behaviour of each
+- [x] `RateLimitStrategy` abstract class returning a `Decision(allowed, remaining, reset_after, retry_after)`
+- [x] Refactor token bucket into it
+- [x] Sliding window log (Redis sorted set: `ZREMRANGEBYSCORE` + `ZCARD` + `ZADD`)
+- [x] Sliding window counter (current + previous window, weighted)
+- [x] Choose algorithm + limits via config / env vars
+- [x] Write in the README: memory cost vs accuracy vs burst behaviour of each
 
 **Done when:** switching `RATEGATE_ALGORITHM` changes behaviour with no code edits; each algorithm has unit tests.
 **You learn:** strategy pattern, Redis data structures, algorithm trade-offs.
@@ -122,4 +122,6 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Progress log
 | Date | Phase | What I learned / problems hit |
 |------|-------|-------------------------------|
-|      |       |                               |
+| 2026-11-02 | 2 | Three algorithms behind `RateLimitStrategy`, chosen by `RATEGATE_ALGORITHM`; middleware untouched; 16 tests pass. Learned: the sliding log returns a burst's allowance all at once a window later, and the sliding counter's results depend on where the window boundary falls. Also: ruff formats code inside Markdown, so `docs/` is excluded |
+| 2026-11-02 | 1 | Token bucket works: burst of 10, refill 1/s, separate buckets per client. Learned: Redis keys expire 10 s after the last request, so inspect Redis on the same line as the requests. Committed `d7687fa` |
+| 2026-11-02 | 0 | Setup with uv, Python 3.12 (system 3.15 too new), Redis in Docker, pushed to GitHub. Learned: Redis port 6379 isn't a website, so the browser shows nothing |
