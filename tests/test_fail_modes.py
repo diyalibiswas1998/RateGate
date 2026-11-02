@@ -27,7 +27,8 @@ async def redis_down():
 
 async def call_api(limiter, fail_mode, api_key, times=1):
     """Send requests through the real app and middleware, using the given limiter."""
-    app.state.limiter = limiter
+    app.state.limiters = {"free": limiter, "paid": limiter}
+    app.state.paid_api_keys = set()
     app.state.fail_mode = fail_mode
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

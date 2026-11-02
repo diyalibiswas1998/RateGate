@@ -113,15 +113,16 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ---
 
 ## Phase 8 — Polish (optional)
-- [ ] `/metrics` with `prometheus-client` (allowed / blocked / fail-open counters)
-- [ ] Architecture diagram + "design decisions" section in README
-- [ ] Per-route or per-tier limits (e.g. free vs paid API keys)
+- [x] `/metrics` with `prometheus-client` (allowed / blocked / fail-open counters) — `rategate_decisions_total{outcome, tier}` (also fail-closed) and a Redis-check timer; per copy, hidden behind nginx; `scripts/collect_metrics.py` adds the copies up
+- [x] Architecture diagram + "design decisions" section in README — a Mermaid flowchart and a decisions table gathered from every phase
+- [x] Per-route or per-tier limits (e.g. free vs paid API keys) — per tier: keys in `RATEGATE_PAID_API_KEYS` get 10 times the free limits; `X-RateLimit-Tier` header
 
 ---
 
 ## Progress log
 | Date | Phase | What I learned / problems hit |
 |------|-------|-------------------------------|
+| 2026-11-03 | 8 | Tiers (free / paid by API key, 10x limits), Prometheus metrics (decisions by outcome and tier, Redis-check timer), architecture diagram and design decisions in the README. 47 tests. Summed per-copy counters matched client results exactly; load-test latency unchanged with metrics on. Learned: metrics are per copy (monitoring adds them up), never label by API key, and build tiers before metrics so the metrics tests fail for the right reason |
 | 2026-11-03 | 7 | Locust: 230 req/s mixed traffic, p50 4 ms / p95 6–7 ms; polite clients never limited; greedy clients get 0.88–1.02/s of the configured 1/s. Capacity: 1 copy ~740 served/s (with 502s), 3 copies 1,920/s, 6 copies 2,730/s; the Python copies are the bottleneck, Redis under 30%. Traps: users started in lockstep looked 8× slower; `docker compose run` without `--no-deps` silently recreated the copies with default settings; one Locust process maxed out first |
 | 2026-11-03 | 6 | GitHub Actions: lint, format, 40 tests against a Redis service container (production timeouts, no `.env`), and the Phase 5 stack checked on every push (burst → exactly 100 across 3 copies). 4 of 4 trial runs green in about 30–90 s; a deliberately broken test turned it red on a temporary branch. Learned: not every action has a short major tag (`setup-uv@v10` doesn't exist); a check script must exit non-zero to fail CI |
 | 2026-11-02 | 5 | 3 API copies behind nginx share one Redis: 200 requests at once, limit 100 → exactly 100 for every algorithm (~33 per copy); with separate state per copy, 300 of 400. A stopped copy: 300/300 still answered, ≤1.01 s. 40 tests. Found and fixed a Phase 4 bug: retrying after a timeout counted a request twice (20 late replies → 40 counts); now only connection errors are retried, which also halves outage detection (hung 0.25 s, stopped 1 s). Learned: nginx workers need `zone` to share round-robin; never trust a client's `X-Forwarded-For`; Windows → Docker Desktop is slower than the real network, so this machine gets its own timeouts in `.env` |

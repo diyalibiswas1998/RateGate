@@ -19,6 +19,7 @@ services:
       RATEGATE_LIMIT:
       RATEGATE_WINDOW_SECONDS:
       RATEGATE_FAIL_MODE:
+      RATEGATE_PAID_API_KEYS:
     deploy:
       replicas: 3
     depends_on:

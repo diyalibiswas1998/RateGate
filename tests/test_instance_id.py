@@ -9,7 +9,8 @@ from app.main import app
 
 async def get(path, limiter, api_key, times=1):
     """Send requests through the real app, the way nginx would hand them over."""
-    app.state.limiter = limiter
+    app.state.limiters = {"free": limiter, "paid": limiter}
+    app.state.paid_api_keys = set()
     app.state.fail_mode = "open"
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Algorithm = Literal["token_bucket", "sliding_log", "sliding_counter"]
 FailMode = Literal["open", "closed"]
+Tier = Literal["free", "paid"]
 
 
 class Settings(BaseSettings):
@@ -27,6 +28,14 @@ class Settings(BaseSettings):
     # Sliding window log and sliding window counter
     limit: int = 10  # max requests per window
     window_seconds: float = 10.0  # window length
+
+    # Paid tier: these API keys get the paid_* limits instead (10 times the free ones).
+    # From the environment as JSON, e.g. RATEGATE_PAID_API_KEYS='["key-1", "key-2"]'
+    paid_api_keys: set[str] = set()
+    paid_capacity: int = 100
+    paid_refill_rate: float = 10.0
+    paid_limit: int = 100
+    paid_window_seconds: float = 10.0
 
 
 settings = Settings()
