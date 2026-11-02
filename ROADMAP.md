@@ -91,9 +91,9 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Phase 6 — CI with GitHub Actions
 **Intent:** every push is automatically checked.
 
-- [ ] Workflow: install `uv` → `ruff check` → `ruff format --check` → `pytest`
-- [ ] Redis as a **service container** in the workflow
-- [ ] CI badge in README
+- [x] Workflow: install `uv` → `ruff check` → `ruff format --check` → `pytest` — `.github/workflows/ci.yml`; `astral-sh/setup-uv` has no `v10` tag, so it's pinned to `v10.3.3`
+- [x] Redis as a **service container** in the workflow — plus a second job that starts the full Docker stack and checks a burst through nginx allows exactly 100 across 3 copies
+- [x] CI badge in README
 
 **Done when:** a pushed commit shows a green check on GitHub; a deliberately broken test turns it red.
 **You learn:** CI pipelines, service containers.
@@ -122,6 +122,7 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Progress log
 | Date | Phase | What I learned / problems hit |
 |------|-------|-------------------------------|
+| 2026-11-03 | 6 | GitHub Actions: lint, format, 40 tests against a Redis service container (production timeouts, no `.env`), and the Phase 5 stack checked on every push (burst → exactly 100 across 3 copies). 4 of 4 trial runs green in about 30–90 s; a deliberately broken test turned it red on a temporary branch. Learned: not every action has a short major tag (`setup-uv@v10` doesn't exist); a check script must exit non-zero to fail CI |
 | 2026-11-02 | 5 | 3 API copies behind nginx share one Redis: 200 requests at once, limit 100 → exactly 100 for every algorithm (~33 per copy); with separate state per copy, 300 of 400. A stopped copy: 300/300 still answered, ≤1.01 s. 40 tests. Found and fixed a Phase 4 bug: retrying after a timeout counted a request twice (20 late replies → 40 counts); now only connection errors are retried, which also halves outage detection (hung 0.25 s, stopped 1 s). Learned: nginx workers need `zone` to share round-robin; never trust a client's `X-Forwarded-For`; Windows → Docker Desktop is slower than the real network, so this machine gets its own timeouts in `.env` |
 | 2026-11-02 | 4 | Fail-open (200, warning) / fail-closed (503 + Retry-After: 5); hung Redis detected in ~0.5 s instead of a 5 s freeze; recovers with no restart; 36 tests. Learned: measure before choosing timeouts (connect ≠ command), one immediate retry handles stale connections, and check new tests fail on old code (one passed for the wrong reason) |
 | 2026-11-02 | 3 | 31 tests: 200 concurrent requests → exactly 100 for every algorithm; a non-atomic control lets 200/200 through. Tests found 2 bugs: the default Redis pool raised `MaxConnectionsError` under a burst (HTTP 500s), fixed with `BlockingConnectionPool`; the sliding counter's `Retry-After` was too short, fixed in Lua. Learned: write the failing test first, and repeat concurrency tests |

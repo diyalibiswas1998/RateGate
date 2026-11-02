@@ -1,5 +1,7 @@
 # RateGate
 
+[![CI](https://github.com/diyalibiswas1998/RateGate/actions/workflows/ci.yml/badge.svg)](https://github.com/diyalibiswas1998/RateGate/actions/workflows/ci.yml)
+
 A distributed rate-limiting service built with FastAPI and Redis. Every API instance checks limits against the same Redis, using atomic Lua scripts, so a client's limit holds no matter which instance answers.
 
 Over the limit, clients get `429 Too Many Requests` with a `Retry-After` header. Every response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`.
@@ -74,6 +76,8 @@ Short timeouts (1 s to connect, 0.25 s per command) keep outages from freezing r
 - **Failure handling:** with Redis unreachable, fail-open returns `200` and fail-closed returns `503`, within the configured timeouts; limiting resumes where it left off once Redis is back.
 - **No double counting:** a request whose reply times out is counted once, never retried into a second count.
 - **Instance id:** every response, including `429`, carries `X-Instance-Id`.
+
+Every push runs the same checks on GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): lint, formatting and all tests against a Redis service container, plus a job that starts the full Docker stack and checks that a burst of 200 requests through nginx is allowed exactly the limit (100) across 3 copies.
 
 End to end against a running server:
 
