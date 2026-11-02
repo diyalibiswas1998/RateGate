@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RATEGATE_", env_file=".env")
 
     redis_url: str = "redis://localhost:6379/0"
+    redis_max_connections: int = 50  # connections shared by all requests
+    redis_pool_timeout: float = 5.0  # seconds to wait for a free connection
     algorithm: Algorithm = "token_bucket"
 
     # Token bucket

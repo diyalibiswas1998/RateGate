@@ -33,11 +33,26 @@ Choose with `RATEGATE_ALGORITHM` (`token_bucket` | `sliding_log` | `sliding_coun
 | After a burst | Refills gradually | Nothing until a full window passes | Fades gradually from the next window |
 | Redis type | Hash | Sorted set | Hash |
 
+## Testing
+
+`uv run pytest` runs 31 tests against a real Redis, including:
+
+- **Concurrency:** 200 simultaneous requests against a limit of 100 allow exactly 100, for every algorithm, from one client and from four independent clients. A deliberately non-atomic limiter in the same test lets all 200 through, showing the test can detect a race.
+- **Boundaries:** waiting the returned `Retry-After` is always enough; idle keys expire on schedule; no double burst across a window boundary.
+
+End to end against a running server:
+
+```bash
+uv run python scripts/concurrent_burst.py --total 200
+```
+
 ## Configuration
 
 | Variable | Default | Used by |
 |---|---|---|
 | `RATEGATE_REDIS_URL` | `redis://localhost:6379/0` | All |
+| `RATEGATE_REDIS_MAX_CONNECTIONS` | `50` | All: Redis connections shared by all requests |
+| `RATEGATE_REDIS_POOL_TIMEOUT` | `5.0` | All: seconds a request waits for a free connection |
 | `RATEGATE_ALGORITHM` | `token_bucket` | All |
 | `RATEGATE_CAPACITY` | `10` | Token bucket: burst size |
 | `RATEGATE_REFILL_RATE` | `1.0` | Token bucket: tokens per second |

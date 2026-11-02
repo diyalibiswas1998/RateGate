@@ -42,12 +42,17 @@ if estimate + cost <= limit then
   allowed = 1
 else
   local room = limit - cost - curr
-  if room < 0 or prev == 0 then
-    -- This window alone is full: wait for the next one.
-    retry_after_ms = window_ms - elapsed
-  else
+  if room >= 0 then
     -- Wait until the previous window's share shrinks enough.
     retry_after_ms = math.ceil(window_ms * (1 - room / prev) - elapsed)
+  else
+    -- This window alone is full. In the next one its count becomes the previous
+    -- count, so also wait for that share to shrink enough.
+    local next_wait = 0
+    if curr > 0 then
+      next_wait = math.max(0, window_ms * (1 - (limit - cost) / curr))
+    end
+    retry_after_ms = math.ceil(window_ms - elapsed + next_wait)
   end
 end
 

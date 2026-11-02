@@ -1,0 +1,15 @@
+from redis.asyncio import BlockingConnectionPool, Redis
+
+from app.config import Settings
+
+
+def create_redis(settings: Settings) -> Redis:
+    # A blocking pool makes a burst of requests wait briefly for a free connection
+    # instead of failing with "Too many connections".
+    pool = BlockingConnectionPool.from_url(
+        settings.redis_url,
+        max_connections=settings.redis_max_connections,
+        timeout=settings.redis_pool_timeout,
+        decode_responses=True,
+    )
+    return Redis.from_pool(pool)

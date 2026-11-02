@@ -1,16 +1,16 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from redis.asyncio import Redis
 
 from app.config import settings
 from app.limiter.factory import create_limiter
 from app.middleware import RateLimitMiddleware
+from app.redis_client import create_redis
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    redis = create_redis(settings)
     app.state.limiter = create_limiter(redis, settings)
     yield
     await redis.aclose()

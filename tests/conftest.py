@@ -1,14 +1,14 @@
 from uuid import uuid4
 
 import pytest
-from redis.asyncio import Redis
 
 from app.config import settings
+from app.redis_client import create_redis
 
 
 @pytest.fixture
 async def redis():
-    client = Redis.from_url(settings.redis_url, decode_responses=True)
+    client = create_redis(settings)
     yield client
     await client.aclose()
 

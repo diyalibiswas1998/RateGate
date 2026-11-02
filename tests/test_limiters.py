@@ -83,3 +83,63 @@ async def test_config_picks_the_algorithm(redis, name, expected_class):
 def test_unknown_algorithm_is_rejected():
     with pytest.raises(ValidationError):
         Settings(algorithm="leaky_bucket")
+
+
+# Boundaries: the edges of time where off-by-one and estimation bugs hide.
+
+# How each algorithm names its key, and how long an idle key should live.
+EXPIRY = {
+    "token_bucket": (
+        lambda redis: TokenBucket(redis, capacity=5, refill_rate=5.0),
+        "rategate:tb:",
+        1.0,
+    ),
+    "sliding_log": (
+        lambda redis: SlidingWindowLog(redis, limit=5, window_seconds=1),
+        "rategate:swl:",
+        1.0,
+    ),
+    "sliding_counter": (
+        lambda redis: SlidingWindowCounter(redis, limit=5, window_seconds=1),
+        "rategate:swc:",
+        2.0,
+    ),
+}
+
+
+async def sleep_until(redis, offset_ms, window_ms=1000):
+    """Sleep until Redis's clock is `offset_ms` into a window."""
+    seconds, micros = await redis.time()
+    elapsed = (seconds * 1000 + micros // 1000) % window_ms
+    await asyncio.sleep(((offset_ms - elapsed) % window_ms) / 1000)
+
+
+@pytest.mark.parametrize("name", ALGORITHMS)
+async def test_waiting_retry_after_is_enough(redis, client_id, name):
+    limiter = make(name, redis)
+    for _ in range(5):
+        await limiter.check(client_id)
+    blocked = await limiter.check(client_id)
+    assert not blocked.allowed
+    await asyncio.sleep(blocked.retry_after + 0.05)
+    assert (await limiter.check(client_id)).allowed
+
+
+@pytest.mark.parametrize("name", EXPIRY)
+async def test_key_expires_when_idle(redis, client_id, name):
+    build, prefix, ttl_seconds = EXPIRY[name]
+    await build(redis).check(client_id)
+    key = f"{prefix}{client_id}"
+    assert 0 < await redis.pttl(key) <= ttl_seconds * 1000
+    await asyncio.sleep(ttl_seconds + 0.1)
+    assert await redis.exists(key) == 0
+
+
+@pytest.mark.parametrize("name", ["sliding_log", "sliding_counter"])
+async def test_no_double_burst_across_window_boundary(redis, client_id, name):
+    limiter = make(name, redis)
+    await sleep_until(redis, 900)  # 100 ms before a window boundary
+    before = [(await limiter.check(client_id)).allowed for _ in range(5)]
+    await sleep_until(redis, 50)  # just after it
+    after = [(await limiter.check(client_id)).allowed for _ in range(5)]
+    assert sum(before) + sum(after) == 5

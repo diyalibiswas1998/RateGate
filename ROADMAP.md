@@ -54,9 +54,9 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Phase 3 — Correctness under concurrency
 **Intent:** prove the "no race conditions" claim with evidence, not words.
 
-- [ ] Tests run against **real Redis** (not fakeredis — its Lua support is partial)
-- [ ] Concurrency test: limit 100, fire 200 simultaneous requests → exactly 100 allowed
-- [ ] Boundary tests: refill timing, window edges, key expiry (`PEXPIRE` so idle clients don't leak memory)
+- [x] Tests run against **real Redis** (not fakeredis — its Lua support is partial)
+- [x] Concurrency test: limit 100, fire 200 simultaneous requests → exactly 100 allowed
+- [x] Boundary tests: refill timing, window edges, key expiry (`PEXPIRE` so idle clients don't leak memory)
 
 **Done when:** `uv run pytest` is green, and the concurrency test passes repeatedly.
 **You learn:** race conditions, why atomic scripts matter, writing meaningful tests.
@@ -122,6 +122,7 @@ and **what you learn**. Finish a phase, verify it, commit, then move on. Never s
 ## Progress log
 | Date | Phase | What I learned / problems hit |
 |------|-------|-------------------------------|
+| 2026-11-02 | 3 | 31 tests: 200 concurrent requests → exactly 100 for every algorithm; a non-atomic control lets 200/200 through. Tests found 2 bugs: the default Redis pool raised `MaxConnectionsError` under a burst (HTTP 500s), fixed with `BlockingConnectionPool`; the sliding counter's `Retry-After` was too short, fixed in Lua. Learned: write the failing test first, and repeat concurrency tests |
 | 2026-11-02 | 2 | Three algorithms behind `RateLimitStrategy`, chosen by `RATEGATE_ALGORITHM`; middleware untouched; 16 tests pass. Learned: the sliding log returns a burst's allowance all at once a window later, and the sliding counter's results depend on where the window boundary falls. Also: ruff formats code inside Markdown, so `docs/` is excluded |
 | 2026-11-02 | 1 | Token bucket works: burst of 10, refill 1/s, separate buckets per client. Learned: Redis keys expire 10 s after the last request, so inspect Redis on the same line as the requests. Committed `d7687fa` |
 | 2026-11-02 | 0 | Setup with uv, Python 3.12 (system 3.15 too new), Redis in Docker, pushed to GitHub. Learned: Redis port 6379 isn't a website, so the browser shows nothing |
