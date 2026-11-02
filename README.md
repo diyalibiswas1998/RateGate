@@ -8,29 +8,108 @@ Over the limit, clients get `429 Too Many Requests` with a `Retry-After` header.
 
 ## Architecture
 
+### The system
+
 ```mermaid
 flowchart LR
-    clients["Clients"] -->|"HTTP, port 8080"| nginx["nginx<br/>round-robin load balancer"]
-    nginx --> api1["API copy 1<br/>FastAPI + rate-limit middleware"]
-    nginx --> api2["API copy 2"]
-    nginx --> api3["API copy 3"]
-    api1 -->|"one atomic Lua script per request"| redis[("Redis<br/>shared counters")]
+    client["Client<br/>identified by its X-API-Key header,<br/>or by its IP address"]
+
+    subgraph network["Docker Compose network: only nginx's port 8080 is published"]
+        nginx["nginx 1.27<br/>round-robin across the copies<br/>(one shared zone for all workers)<br/>overwrites X-Forwarded-For<br/>gives up on a dead copy after 1 s<br/>answers 404 for /metrics"]
+
+        subgraph copies["API copies: 3 by default, more with --scale"]
+            api1["API copy 1<br/>FastAPI + uvicorn<br/>rate-limit middleware<br/>free and paid limiters<br/>own /metrics counters"]
+            api2["API copy 2<br/>identical"]
+            api3["API copy 3<br/>identical"]
+        end
+
+        redis[("Redis 7<br/>the only shared state<br/>one key per client:<br/>rategate:tb, :swl or :swc<br/>keys expire when idle")]
+
+        monitor["Monitoring<br/>e.g. Prometheus<br/>reads each copy's /metrics"]
+        locust["Locust<br/>load tests, started on request<br/>(Compose profile loadtest)"]
+    end
+
+    client -->|"HTTP, port 8080"| nginx
+    nginx -->|"next copy in turn"| api1
+    nginx --> api2
+    nginx --> api3
+    api1 -->|"one atomic Lua script per request<br/>0.25 s reply / 1 s connect timeout"| redis
     api2 --> redis
     api3 --> redis
-    monitor["Monitoring<br/>reads each copy's /metrics"] -.-> api1
+    monitor -.->|"port 8000, inside the network"| api1
     monitor -.-> api2
     monitor -.-> api3
+    locust -.->|"like a client"| nginx
 ```
 
-How one request is checked:
+The copies keep no state of their own, so any copy can answer any request, and adding copies adds capacity (see Load testing). Redis runs each script on its own, so no two copies can interleave a client's read and write.
 
-1. nginx hands the request to the next copy in turn, and sets `X-Forwarded-For` to the client's real address.
-2. The copy's middleware identifies the client (`X-API-Key`, or the IP address) and its tier (`paid` if the key is listed, otherwise `free`).
-3. It runs that tier's algorithm as one Lua script in Redis. Redis runs scripts one at a time, so no two copies can interleave their read and write.
-4. Allowed: the route runs, and the answer carries the `X-RateLimit-*` headers. Over the limit: `429` with `Retry-After`. Redis unreachable: the fail mode decides (`200` or `503`).
-5. The copy counts the decision for `/metrics`.
+### Inside one API copy
 
-The copies keep no state of their own, so any copy can answer any request, and adding copies adds capacity (see Load testing).
+```mermaid
+flowchart LR
+    settings["config.py<br/>every RATEGATE_* setting:<br/>algorithm, limits per tier,<br/>paid keys, fail mode, timeouts"]
+    main["main.py<br/>FastAPI app and routes:<br/>/api/resource, /health, /metrics<br/>at startup: one limiter per tier<br/>adds X-Instance-Id to every response"]
+    middleware["middleware.py<br/>identifies the client and its tier<br/>asks that tier's limiter<br/>200, 429, or the fail mode<br/>X-RateLimit-* headers"]
+    metrics["metrics.py<br/>rategate_decisions_total<br/>rategate_check_seconds"]
+    redisclient["redis_client.py<br/>pool of 50 connections<br/>short timeouts<br/>retries only dead connections"]
+    redis[("Redis")]
+
+    subgraph limiter["limiter/"]
+        factory["factory.py<br/>builds the chosen algorithm<br/>with the tier's limits"]
+        base["base.py<br/>RateLimitStrategy interface<br/>Decision: allowed, limit, remaining,<br/>retry_after, reset_after"]
+        tb["token_bucket.py<br/>+ token_bucket.lua"]
+        sl["sliding_log.py<br/>+ sliding_log.lua"]
+        sc["sliding_counter.py<br/>+ sliding_counter.lua"]
+    end
+
+    settings --> main
+    main -->|"create_limiter(redis, settings, tier)"| factory
+    main --> redisclient
+    factory --> tb
+    factory --> sl
+    factory --> sc
+    tb -.->|"implements"| base
+    sl -.->|"implements"| base
+    sc -.->|"implements"| base
+    main -->|"added as middleware"| middleware
+    middleware -->|"limiter.check(client)"| base
+    middleware -->|"counts every decision"| metrics
+    tb -->|"EVALSHA"| redisclient
+    sl -->|"EVALSHA"| redisclient
+    sc -->|"EVALSHA"| redisclient
+    redisclient --> redis
+```
+
+Only the algorithm classes know about Redis keys and scripts; the middleware only knows the `RateLimitStrategy` interface, so switching algorithms is one setting (`RATEGATE_ALGORITHM`).
+
+### How one request is checked
+
+```mermaid
+flowchart TD
+    arrive(["A request reaches an API copy,<br/>with the client's real IP from nginx"])
+    arrive --> exempt{"Path is /health, /metrics,<br/>/docs or /openapi.json?"}
+    exempt -->|"yes"| free_pass["The route runs,<br/>never rate-limited"]
+    exempt -->|"no"| identify["Identify the client:<br/>key:API_KEY, or ip:ADDRESS"]
+    identify --> tier{"Is the API key in<br/>RATEGATE_PAID_API_KEYS?"}
+    tier -->|"yes"| paid["Paid limiter<br/>e.g. token bucket: 100 burst, 10 per second"]
+    tier -->|"no, or no key"| free["Free limiter<br/>e.g. token bucket: 10 burst, 1 per second"]
+    paid --> check
+    free --> check
+    check["One Lua script in Redis:<br/>read the client's state, decide, write it back,<br/>all in one atomic step, using Redis's clock<br/>(timed for rategate_check_seconds)"]
+    check -->|"Redis answered"| allowed{"Within the limit?"}
+    check -->|"timeout or connection error<br/>(a dead connection is retried once,<br/>a timeout is not)"| failmode{"RATEGATE_FAIL_MODE?"}
+    allowed -->|"yes"| ok["200 from the route<br/>X-RateLimit-Limit, -Remaining,<br/>-Reset and -Tier"]
+    allowed -->|"no"| limited["429 Too Many Requests<br/>Retry-After + X-RateLimit headers"]
+    failmode -->|"open (default)"| open["200, unchecked<br/>warning logged"]
+    failmode -->|"closed"| closed["503 Service Unavailable<br/>Retry-After: 5, error logged"]
+    ok --> counted["Counted in rategate_decisions_total<br/>by outcome and tier"]
+    limited --> counted
+    open --> counted
+    closed --> counted
+```
+
+Every response, including `429` and `503`, also carries `X-Instance-Id`, naming the copy that answered.
 
 ## Run it
 
